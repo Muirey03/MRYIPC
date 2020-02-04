@@ -1,4 +1,4 @@
-#import "../MRYIPCCenter.h"
+#import "MRYIPCCenter.h"
 
 @interface MRYExampleServer : NSObject
 @end
@@ -28,7 +28,7 @@
 	if ((self = [super init]))
 	{
 		_center = [MRYIPCCenter centerNamed:@"com.muirey03.MRYExampleServer"];
-		[_center registerMethod:@selector(addNumbers:) withTarget:self];
+		[_center addTarget:self action:@selector(addNumbers:)];
 		NSLog(@"[MRYIPCExample] running server in %@", [NSProcessInfo processInfo].processName);
 	}
 	return self;
@@ -41,8 +41,3 @@
 	return @(value1 + value2);
 }
 @end
-
-%ctor
-{
-	[MRYExampleServer load];
-}

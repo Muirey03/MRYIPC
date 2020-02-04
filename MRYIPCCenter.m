@@ -1,3 +1,4 @@
+@import Foundation;
 #import "MRYIPCCenter.h"
 
 #define THROW(...) [self _throwException:[NSString stringWithFormat:__VA_ARGS__] fromMethod:_cmd]
@@ -55,21 +56,34 @@
 	return self;
 }
 
--(void)registerMethod:(SEL)selector withTarget:(id)target
+-(void)addTarget:(id)target action:(SEL)action
 {
-	if (!selector)
+	if (!action || !strlen(sel_getName(action)))
 		THROW(@"method cannot be null");
 	if (!target)
 		THROW(@"target cannot be null");
 	
-	NSString* messageName = [self _messageNameForSelector:selector];
+	NSString* messageName = [self _messageNameForSelector:action];
 	if (_methods[messageName])
-		THROW(@"method already registered: %@", NSStringFromSelector(selector));
+		THROW(@"method already registered: %@", NSStringFromSelector(action));
 	
-	_MRYIPCMethod* method = [[_MRYIPCMethod alloc] initWithTarget:target selector:selector];
+	_MRYIPCMethod* method = [[_MRYIPCMethod alloc] initWithTarget:target selector:action];
 	_methods[messageName] = method;
 
 	[_notificationCenter addObserver:self selector:@selector(_messageReceived:) name:messageName object:nil];
+}
+
+//deprecated
+-(void)registerMethod:(SEL)selector withTarget:(id)target
+{
+	[self addTarget:target action:selector];
+}
+
+-(void)callExternalVoidMethod:(SEL)method withArguments:(NSDictionary*)args
+{
+	NSString* messageName = [self _messageNameForSelector:method];
+	NSDictionary* userInfo = args ? @{@"args" : args} : @{};
+	[_notificationCenter postNotificationName:messageName object:nil userInfo:userInfo];
 }
 
 -(id)callExternalMethod:(SEL)method withArguments:(NSDictionary*)args
@@ -82,13 +96,6 @@
 	}];
 	dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
 	return returnValue;
-}
-
--(void)callExternalVoidMethod:(SEL)method withArguments:(NSDictionary*)args
-{
-	NSString* messageName = [self _messageNameForSelector:method];
-	NSDictionary* userInfo = args ? @{@"args" : args} : @{};
-	[_notificationCenter postNotificationName:messageName object:nil userInfo:userInfo];
 }
 
 -(void)callExternalMethod:(SEL)method withArguments:(NSDictionary*)args completion:(void(^)(id))completionHandler

@@ -6,9 +6,9 @@ MRYIPC is an easy-to-use IPC (inter-process communication) mechanism for jailbro
 `MRYIPCCenter` is similar in API to `CPDistributedMessagingCenter`, so it shouldn't be too challenging to replace current `CPDistributedMessagingCenter` implementations with `MRYIPCCenter`.
 
 ## How to use
-To use MRYIPC, just copy MRYIPCCenter.h and MRYIPCCenter.m into your project (please make sure to compile with ARC), import `"MRYIPCCenter.h"` into any source files you want to use it in, and start implementing it.
+To use MRYIPC, copy `MRYIPCCenter.h` to `$THEOS/include` and `usr/lib/libmryipc.dylib` to `$THEOS/lib`. Then you can add `XXX_LIBRARIES = mryipc` to your Makefile and `#import "MRYIPCCenter.h"` into any source files you want to use it in.
 
-An example can be seen in ExampleClient and ExampleServer in this repository.
+An example usage can be seen in ExampleClient and ExampleServer in this repository.
 
 ### The client
 First, create the client center:
@@ -20,10 +20,10 @@ Then, go ahead and call any method you like:
 
 `MRYIPCCenter` provides 3 ways to call methods on the center:
 
-	//synchronously call a method and recieve the return value
-	-(id)callExternalMethod:(SEL)method withArguments:(NSDictionary*)args;
 	//asynchronously call a void method
 	-(void)callExternalVoidMethod:(SEL)method withArguments:(NSDictionary*)args;
+	//synchronously call a method and recieve the return value
+	-(id)callExternalMethod:(SEL)method withArguments:(NSDictionary*)args;
 	//asynchronously call a method and receive the return value in the completion handler
 	-(void)callExternalMethod:(SEL)method withArguments:(NSDictionary*)args completion:(void(^)(id))completionHandler;
 
@@ -31,9 +31,10 @@ Then, go ahead and call any method you like:
 Again, start by creating a sever center with the same name as the client (you'll need to store a reference somewhere to stop it being deallocated):
 
 	MRYIPCCenter* center = [MRYIPCCenter centerNamed:@"com.muirey03.MRYExampleServer"];
+	
 Then register any methods you want to make external:
 
-	[center registerMethod:@selector(addNumbers:) withTarget:self];
+	[center addTarget:self action:@selector(addNumbers:)];
 
 Then just implement the methods and let MRYIPC handle the rest:
 

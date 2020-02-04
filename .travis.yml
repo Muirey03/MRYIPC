@@ -1,0 +1,28 @@
+os: osx
+language: objective-c
+osx_image: xcode10.1
+sudo: false
+env:
+  global:
+  - THEOS=~/theos
+before_install:
+- brew install dpkg ldid
+- git clone --recursive git://github.com/theos/theos.git ~/theos
+script:
+- make clean package FINALPACKAGE=1
+before_deploy:
+- git config --local user.name "Muirey03"
+- git config --local user.email "tommy.muir@btinternet.com"
+- export RELEASE_PKG_FILE=$(ls ./packages/*.deb)
+- export TRAVIS_TAG=${TRAVIS_TAG:-$(date +'%Y%m%d%H%M%S')-$(git log --format=%h -1)}
+- git tag $TRAVIS_TAG
+deploy:
+  provider: releases
+  skip_cleanup: true
+  api_key:
+    secure: hrtJ4y9wB7/snfZmfmKDU5FxNnFL2K/uGMlarKA+5EKVOEkWXN1l3axCJeSgirF5aX1tf0/FWXZ9QH7rATB8xvGjBfud48t60S0qyN+roslnKp6Jb8O1LQJrrMRAKjlRx5m6WS5OwEXVcJckLxdN6CL6R7xF4FcISrXfiis3tK7AM8LuB2VDaDEdqIfIo7nydWR88mMLdqUWlK++6UGZ/td/1JT0THRhgOtZ+PPhQnpnbVNJLOGloYNBr3C+PWqqnLghxTfLSHsrxgBFnJfZUL0G9O9QA1hzpUMZlW1I2WIHtumMZ7zlEkXiZR9N+COqQSJ+oaIwOak6PNDALGAU/JTTBuGYhIuRN7H8ar3vDbMg5r6Zvb995MVz5dRenwjGJ88ql4AhwdT2vqa6D477VjIxR34ZjQIxC9AOYCb3B2lL3wg3/xoNaBlw7SwdOogYWusD4BdS1gjtIFXxIAbLTZbbglJblVLT1g8AWNKBmXstPStpR0KV7LXSVA+qG4+JLjkgiSra37q7L8+v8CyYcfSbhtCFNLWcWhBaEFSn4WDTNf0Q4XLYK6Js8jeMUSXahfoZPj7id/rGbvFDApyH8yDyvaEhhomLmECyFkO+ja6OhhdMw7glHiXv4vZhVQ7HEmnJDvre3fJ3wfrROnuti0BMcMt3BMEv67iiL5XfyTI=
+  file_glob: true
+  file: "${RELEASE_PKG_FILE}"
+  on:
+    repo: Muirey03/MRYIPC
+    branch: master
