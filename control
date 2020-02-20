@@ -1,6 +1,6 @@
 Package: com.muirey03.libmryipc
 Name: libMRYIPC
-Version: 1.0-1
+Version: 1.0
 Architecture: iphoneos-arm
 Description: Easy-to-use, RocketBootstrap-less iOS IPC
 Maintainer: Muirey03
