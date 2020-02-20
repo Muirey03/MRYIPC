@@ -1,12 +1,12 @@
 # MRYIPC
 ### Easy-to-use iOS IPC without the need for RocketBootstrap
 
-MRYIPC is an easy-to-use IPC (inter-process communication) mechanism for jailbroken devices (although it will also work on unjailbroken devices) that eliminated the need for RocketBootstrap.
+MRYIPC is an easy-to-use IPC (inter-process communication) mechanism for jailbroken devices (although it will also work on unjailbroken devices) that eliminates the need for RocketBootstrap.
 
 `MRYIPCCenter` is similar in API to `CPDistributedMessagingCenter`, so it shouldn't be too challenging to replace current `CPDistributedMessagingCenter` implementations with `MRYIPCCenter`.
 
 ## How to use
-To use MRYIPC, copy `MRYIPCCenter.h` to `$THEOS/include` and `usr/lib/libmryipc.dylib` to `$THEOS/lib`. Then you can add `XXX_LIBRARIES = mryipc` to your Makefile and `#import "MRYIPCCenter.h"` into any source files you want to use it in.
+To use MRYIPC, copy `MRYIPCCenter.h` to `$THEOS/include` and `usr/lib/libmryipc.dylib` to `$THEOS/lib`. Then you can add `XXX_LIBRARIES = mryipc` to your Makefile and `#import <MRYIPCCenter.h>` into any source files you want to use it in. Then add `Depends: com.muirey03.libmryipc` to your control file.
 
 An example usage can be seen in ExampleClient and ExampleServer in this repository.
 
@@ -31,7 +31,7 @@ Then, go ahead and call any method you like:
 Again, start by creating a sever center with the same name as the client (you'll need to store a reference somewhere to stop it being deallocated):
 
 	MRYIPCCenter* center = [MRYIPCCenter centerNamed:@"com.muirey03.MRYExampleServer"];
-	
+
 Then register any methods you want to make external:
 
 	[center addTarget:self action:@selector(addNumbers:)];

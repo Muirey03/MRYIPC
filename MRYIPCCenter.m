@@ -141,15 +141,17 @@
 	invocation.selector = method.selector;
 	NSDictionary* args = notification.userInfo[@"args"];
 	NSString* replyUUID = notification.userInfo[@"replyUUID"];
-	[invocation setArgument:&args atIndex:2];
+	if (args)
+		[invocation setArgument:&args atIndex:2];
 	[invocation invoke];
 
 	//send reply:
 	if (replyUUID.length)
 	{
-		id returnValue = nil;
+		__unsafe_unretained id weakReturnValue = nil;
 		if (strcmp(signature.methodReturnType, "v") != 0)
-			[invocation getReturnValue:&returnValue];
+			[invocation getReturnValue:&weakReturnValue];
+		id returnValue = weakReturnValue;
 		NSDictionary* replyDict = returnValue ? @{@"returnValue" : returnValue} : @{};
 		NSString* replyMessageName = [self _messageReplyNameForSelector:method.selector uuid:replyUUID];
 		[_notificationCenter postNotificationName:replyMessageName object:nil userInfo:replyDict];
