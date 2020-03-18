@@ -89,7 +89,7 @@
         returnValue = ret;
         dispatch_semaphore_signal(sema);
     }];
-    dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
+    dispatch_semaphore_wait(sema, (int64_t)(4.0 * NSEC_PER_SEC));
     return returnValue;
 }
 
