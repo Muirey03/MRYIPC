@@ -175,16 +175,14 @@
 	if (err || !dictBytes)
 		THROW(@"Failed to serialize dictionary with error: %@", err);
 	NSDictionary* properties = @{
-		(__bridge NSString*)kIOSurfaceWidth : @1,
-		(__bridge NSString*)kIOSurfaceHeight : @1,
-		(__bridge NSString*)kIOSurfaceBytesPerElement : @(dictSize)
+		(__bridge NSString*)kIOSurfaceAllocSize : @(dictSize)
 	};
 	IOSurfaceRef surface = IOSurfaceCreate((__bridge CFDictionaryRef)properties);
 	
 	if (!surface)
-		THROW(@"Failed to create surface for userInfo");
+		THROW(@"Failed to create surface for dictionary");
 	if (IOSurfaceGetAllocSize(surface) < dictSize)
-		THROW(@"Surface too small for userInfo");
+		THROW(@"Surface too small for dictionary");
 	memcpy(IOSurfaceGetBaseAddress(surface), dictBytes, dictSize);
 	return surface;
 }
