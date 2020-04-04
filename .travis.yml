@@ -6,8 +6,13 @@ env:
   global:
   - THEOS=~/theos
 before_install:
-- brew install dpkg ldid
-- git clone --recursive git://github.com/theos/theos.git ~/theos
+- brew install ldid xz
+- git clone --recursive git://github.com/theos/theos.git $THEOS
+- curl -LO https://github.com/theos/sdks/archive/master.zip
+- TMP=$(mktemp -d)
+- unzip master.zip -d $TMP
+- mv $TMP/sdks-master/*.sdk $THEOS/sdks
+- rm -r master.zip $TMP
 script:
 - make clean package FINALPACKAGE=1
 before_deploy:

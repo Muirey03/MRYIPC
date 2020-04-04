@@ -1,0 +1,5 @@
+#!/bin/sh
+echo "Killing mryipcd..."
+launchctl unload /Library/LaunchDaemons/com.muirey03.mryipcd.plist 2> /dev/null
+echo "Done!"
+exit 0
