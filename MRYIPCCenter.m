@@ -75,10 +75,18 @@
 	IOSurfaceRef surface = [self _createSurfaceForDictionary:@{@"centerName" : _centerName, @"messageName" : messageName}];
 	[self _sendNotificationWithName:@"com.muirey03.libmryipc-registerMethod" state:[self _stateForSurface:surface]];
 	
-	float timeout = 2.0;
-	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, timeout * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-		CFRelease(surface);
+	//wait for confirmation from server:
+	NSString* replyMessageName = [messageName stringByAppendingString:@"-registered"];
+	int notifyToken;
+	__block dispatch_queue_t replyQueue = dispatch_queue_create("com.muirey03.libMRYIPC-registerReplyQueue", NULL);
+	dispatch_semaphore_t sema = dispatch_semaphore_create(0);
+	notify_register_dispatch(replyMessageName.UTF8String, &notifyToken, replyQueue, ^(int token){
+		notify_cancel(token);
+		dispatch_semaphore_signal(sema);
+		replyQueue = nil;
 	});
+	dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
+	CFRelease(surface);
 	
 	_MRYIPCMethod* method = [[_MRYIPCMethod alloc] initWithTarget:target selector:action];
 	_methods[messageName] = method;
@@ -109,8 +117,17 @@
 
 -(void)callExternalMethod:(SEL)method withArguments:(NSDictionary*)args completion:(void(^)(id))completionHandler
 {
+	static dispatch_semaphore_t sema;
+	static dispatch_once_t onceToken = 0;
+	dispatch_once(&onceToken, ^{
+		sema = dispatch_semaphore_create(1);
+	});
+	dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
+
 	NSString* replyUUID = [NSUUID UUID].UUIDString;
 	NSString* messageName = [self _messageNameForSelector:method];
+	IOSurfaceRef messageSurface = NULL;
+
 	NSString* replyMessageName = [NSString stringWithFormat:@"%@-client", [self _messageReplyNameForSelector:method uuid:replyUUID]];
 	int notifyToken;
 	__block dispatch_queue_t replyQueue = dispatch_queue_create("com.muirey03.libMRYIPC-replyQueue", NULL);
@@ -130,6 +147,9 @@
 		if (completionHandler)
 			completionHandler(userInfo[@"returnValue"]);
 		replyQueue = nil;
+		if (messageSurface)
+			CFRelease(messageSurface);
+		dispatch_semaphore_signal(sema);
 	});
 
 	//create userInfo:
@@ -140,15 +160,10 @@
 		userInfo[@"args"] = args;
 	
 	//create surface:
-	IOSurfaceRef messageSurface = [self _createSurfaceForDictionary:userInfo];
+	messageSurface = [self _createSurfaceForDictionary:userInfo];
 
 	//send notification:
 	[self _sendNotificationWithName:messageName state:[self _stateForSurface:messageSurface]];
-
-	float timeout = 2.0;
-	dispatch_after(dispatch_time(DISPATCH_TIME_NOW, timeout * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-		CFRelease(messageSurface);
-	});
 }
 
 -(NSString*)_messageNameForString:(NSString*)str

@@ -14,6 +14,4 @@ internal-stage::
 	mkdir -p usr/lib
 	cp $(THEOS_STAGING_DIR)/usr/lib/libmryipc.dylib usr/lib/libmryipc.dylib
 SUBPROJECTS += mryipcd
-SUBPROJECTS += exampleclient
-SUBPROJECTS += exampleserver
 include $(THEOS_MAKE_PATH)/aggregate.mk

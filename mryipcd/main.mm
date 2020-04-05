@@ -99,6 +99,8 @@
 		{
 			_observers[messageName] = [MRYIPCObserver observerWithCenterName:dict[@"centerName"] pid:pid];
 			[self addObserverForName:messageName selector:@selector(messageRequestReceived:withState:)];
+			NSString* replyMessageName = [messageName stringByAppendingString:@"-registered"];
+			[self sendNotificationWithName:replyMessageName state:0];
 		}
 	}
 	if (surfacePort)
