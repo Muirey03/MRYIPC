@@ -1,9 +1,5 @@
 #!/bin/sh
-echo "Starting mryipcd..."
-chown root:wheel /usr/libexec/mryipcd
-chmod 755 /usr/libexec/mryipcd
-chown root:wheel /Library/LaunchDaemons/com.muirey03.mryipcd.plist
-chmod 644 /Library/LaunchDaemons/com.muirey03.mryipcd.plist
-launchctl load /Library/LaunchDaemons/com.muirey03.mryipcd.plist 2> /dev/null
+echo "Restarting MobileGestaltHelper..."
+killall -9 MobileGestaltHelper 2> /dev/null
 echo "Done!"
 exit 0

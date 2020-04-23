@@ -1,10 +1,18 @@
 @import Foundation;
 #include <mach/mach.h>
-#include <notify.h>
-#import <IOSurface/IOSurfaceRef.h>
+#include "mrybootstrap.h"
 #import "MRYIPCCenter.h"
 
-#define THROW(...) [self _throwException:[NSString stringWithFormat:__VA_ARGS__] fromMethod:_cmd]
+#define THROW(...) _throwException([NSString stringWithFormat:__VA_ARGS__], _cmd)
+#define kMRYIPCCallMethodID 'CALL'
+#define kMRYIPCMethodReplyID 'REPL'
+
+static void _throwException(NSString* msg, SEL method)
+{
+	NSString* reason = [NSString stringWithFormat:@"%@ - %@", NSStringFromSelector(method), msg];
+	NSException* myException = [NSException exceptionWithName:@"MRYIPCException" reason:reason userInfo:nil];
+	@throw myException;
+}
 
 @interface _MRYIPCMethod : NSObject
 @property (nonatomic, readonly) id target;
@@ -24,21 +32,29 @@
 }
 @end
 
+typedef struct MRYIPCMessage
+{
+	mach_msg_base_t base;
+	mach_msg_ool_descriptor_t messageName;
+	mach_msg_ool_descriptor_t userInfo;
+} MRYIPCMessage_t;
+
 @interface MRYIPCCenter ()
 -(instancetype)initWithName:(NSString*)name;
--(void)_throwException:(NSString*)msg fromMethod:(SEL)method;
 -(NSString*)_messageNameForSelector:(SEL)selector;
--(NSString*)_messageReplyNameForSelector:(SEL)selector uuid:(NSString*)uuid;
--(void)_sendNotificationWithName:(NSString*)name state:(uint64_t)state;
--(void)_addObserverForName:(NSString*)name selector:(SEL)sel;
--(IOSurfaceRef)_createSurfaceForDictionary:(NSDictionary*)dict;
--(NSDictionary*)_dictionaryForSurface:(IOSurfaceRef)surface;
+-(void)_createMessage:(MRYIPCMessage_t*)msg withName:(const char*)name userInfo:(NSDictionary*)userInfo remotePort:(mach_port_t)remotePort userInfoData:(__strong NSData**)userInfoData;
+-(BOOL)_validateMessage:(MRYIPCMessage_t*)msg forID:(uint32_t)msgID;
+-(NSDictionary*)_userInfoForMessage:(MRYIPCMessage_t*)msg;
+-(void)_freeOOLDataInMessage:(MRYIPCMessage_t*)msg;
+-(BOOL)_messageReceived:(MRYIPCMessage_t*)msg;
 @end
 
 @implementation MRYIPCCenter
 {
 	NSMutableDictionary<NSString*, _MRYIPCMethod*>* _methods;
-	NSMutableArray* _observerTokens;
+	name_t _serviceName;
+	mach_port_t _serverPort;
+	dispatch_queue_t _queue;
 }
 
 +(instancetype)centerNamed:(NSString*)name
@@ -53,10 +69,9 @@
 		if (!name.length)
 			THROW(@"a center name must be supplied");
 		_centerName = name;
+		snprintf(_serviceName, sizeof(_serviceName), "mry:%s-service", name.UTF8String);
 		_methods = [NSMutableDictionary new];
-		_observerTokens = [NSMutableArray new];
-
-		[self _addObserverForName:[self _messageNameForString:@"messageReceived"] selector:@selector(_messageReceived:withState:)];
+		_queue = dispatch_queue_create("com.muirey03.libmryipc-messageQueue", NULL);
 	}
 	return self;
 }
@@ -72,22 +87,36 @@
 	if (_methods[messageName])
 		THROW(@"method already registered: %@", NSStringFromSelector(action));
 	
-	IOSurfaceRef surface = [self _createSurfaceForDictionary:@{@"centerName" : _centerName, @"messageName" : messageName}];
-	[self _sendNotificationWithName:@"com.muirey03.libmryipc-registerMethod" state:[self _stateForSurface:surface]];
-	
-	//wait for confirmation from server:
-	NSString* replyMessageName = [messageName stringByAppendingString:@"-registered"];
-	int notifyToken;
-	__block dispatch_queue_t replyQueue = dispatch_queue_create("com.muirey03.libMRYIPC-registerReplyQueue", NULL);
-	dispatch_semaphore_t sema = dispatch_semaphore_create(0);
-	notify_register_dispatch(replyMessageName.UTF8String, &notifyToken, replyQueue, ^(int token){
-		notify_cancel(token);
-		dispatch_semaphore_signal(sema);
-		replyQueue = nil;
-	});
-	dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
-	CFRelease(surface);
-	
+	if (_serverPort == MACH_PORT_NULL)
+	{
+		kern_return_t kr = mrybootstrap_check_in(_serviceName, &_serverPort);
+		if (kr != KERN_SUCCESS)
+			THROW(@"Failed to create server receive port: %s", bootstrap_strerror(kr));
+
+		dispatch_async(_queue, ^{
+			for (;;)
+			{
+				#define MAX_RCV_SIZE (sizeof(MRYIPCMessage_t) + 8)
+				union
+				{
+					MRYIPCMessage_t msg;
+					char padding[MAX_RCV_SIZE];
+				} buffer;
+				MRYIPCMessage_t* msg = &buffer.msg;
+				
+				mach_msg_return_t ret = mach_msg(&msg->base.header, MACH_RCV_MSG, 0, MAX_RCV_SIZE, _serverPort, MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL);
+				if (ret == KERN_SUCCESS)
+				{
+					BOOL success = [self _messageReceived:msg];
+					if (success)
+					{
+						mach_msg(&msg->base.header, MACH_SEND_MSG, msg->base.header.msgh_size, 0, MACH_PORT_NULL, MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL);
+					}
+				}
+			}
+		});
+	}
+
 	_MRYIPCMethod* method = [[_MRYIPCMethod alloc] initWithTarget:target selector:action];
 	_methods[messageName] = method;
 }
@@ -117,202 +146,168 @@
 
 -(void)callExternalMethod:(SEL)method withArguments:(NSDictionary*)args completion:(void(^)(id))completionHandler
 {
-	static dispatch_semaphore_t sema;
-	static dispatch_once_t onceToken = 0;
-	dispatch_once(&onceToken, ^{
-		sema = dispatch_semaphore_create(1);
-	});
-	dispatch_semaphore_wait(sema, DISPATCH_TIME_FOREVER);
-
-	NSString* replyUUID = [NSUUID UUID].UUIDString;
-	NSString* messageName = [self _messageNameForSelector:method];
-	IOSurfaceRef messageSurface = NULL;
-
-	NSString* replyMessageName = [NSString stringWithFormat:@"%@-client", [self _messageReplyNameForSelector:method uuid:replyUUID]];
-	int notifyToken;
-	__block dispatch_queue_t replyQueue = dispatch_queue_create("com.muirey03.libMRYIPC-replyQueue", NULL);
-	notify_register_dispatch(replyMessageName.UTF8String, &notifyToken, replyQueue, ^(int token){
-		uint64_t state;
-		notify_get_state(token, &state);
-		notify_cancel(token);
-		mach_port_t surfacePort = (mach_port_t)state;
-		IOSurfaceRef userInfoSurface = IOSurfaceLookupFromMachPort(surfacePort);
-		NSDictionary* userInfo = nil;
-		if (userInfoSurface)
+	dispatch_async(_queue, ^{
+		kern_return_t kr;
+		if (!_serverPort)
 		{
-			userInfo = [self _dictionaryForSurface:userInfoSurface];
-			CFRelease(userInfoSurface);
-			mach_port_deallocate(mach_task_self(), surfacePort);
+			mach_port_t sendPort = MACH_PORT_NULL;
+			kr = mrybootstrap_look_up(_serviceName, &sendPort);
+			if (kr != KERN_SUCCESS)
+				THROW(@"Failed to lookup service port: %s", bootstrap_strerror(kr));
+			_serverPort = sendPort;
 		}
+
+		NSString* messageName = [self _messageNameForSelector:method];
+
+		mach_port_t (^createReplyPort)(void) = ^{
+			kern_return_t kr;
+			mach_port_t port = MACH_PORT_NULL;
+			kr = mach_port_allocate(mach_task_self(), MACH_PORT_RIGHT_RECEIVE, &port);
+			kr = mach_port_insert_right(mach_task_self(), port, port, MACH_MSG_TYPE_MAKE_SEND);
+			return port;
+		};
+
+		#define MAX_RCV_SIZE (sizeof(MRYIPCMessage_t) + 8)
+		union
+		{
+			MRYIPCMessage_t msg;
+			char padding[MAX_RCV_SIZE];
+		} buffer;
+		MRYIPCMessage_t* msg = &buffer.msg;
+
+		NSData* userInfoData;
+		[self _createMessage:msg withName:messageName.UTF8String userInfo:args remotePort:_serverPort userInfoData:&userInfoData];
+		mach_port_t replyPort = createReplyPort();
+		msg->base.header.msgh_local_port = replyPort;
+		mach_msg_return_t ret = KERN_SUCCESS;
+		ret = mach_msg(&msg->base.header, MACH_SEND_MSG | MACH_RCV_MSG, sizeof(MRYIPCMessage_t), MAX_RCV_SIZE, replyPort, MACH_MSG_TIMEOUT_NONE, MACH_PORT_NULL);
+		if (ret != KERN_SUCCESS)
+			THROW(@"mach_msg failed: %s", mach_error_string(ret));
+		BOOL valid = [self _validateMessage:msg forID:kMRYIPCMethodReplyID];
+		if (!valid)
+			THROW(@"Invalid reply message");
+
+		NSDictionary* userInfo = [self _userInfoForMessage:msg];
+		id returnValue = userInfo ? userInfo[@"returnValue"] : nil;
 		if (completionHandler)
-			completionHandler(userInfo[@"returnValue"]);
-		replyQueue = nil;
-		if (messageSurface)
-			CFRelease(messageSurface);
-		dispatch_semaphore_signal(sema);
+			completionHandler(returnValue);
+		mach_port_deallocate(mach_task_self(), replyPort);
+		[self _freeOOLDataInMessage:msg];
+		#undef MAX_RCV_SIZE
 	});
-
-	//create userInfo:
-	NSMutableDictionary* userInfo = [NSMutableDictionary new];
-	userInfo[@"name"] = messageName;
-	userInfo[@"replyUUID"] = replyUUID;
-	if (args)
-		userInfo[@"args"] = args;
-	
-	//create surface:
-	messageSurface = [self _createSurfaceForDictionary:userInfo];
-
-	//send notification:
-	[self _sendNotificationWithName:messageName state:[self _stateForSurface:messageSurface]];
-}
-
--(NSString*)_messageNameForString:(NSString*)str
-{
-	return [NSString stringWithFormat:@"MRYIPCCenter-%@-%@", _centerName, str];
 }
 
 -(NSString*)_messageNameForSelector:(SEL)selector
 {
-	return [self _messageNameForString:NSStringFromSelector(selector)];
+	return [NSString stringWithFormat:@"MRYIPCCenter-%@-%@", _centerName, NSStringFromSelector(selector)];
 }
 
--(NSString*)_messageReplyNameForSelector:(SEL)selector uuid:(NSString*)uuid
+-(void)_createMessage:(MRYIPCMessage_t*)msg withName:(const char*)name userInfo:(NSDictionary*)userInfo remotePort:(mach_port_t)remotePort userInfoData:(__strong NSData**)userInfoData
 {
-	return [self _messageNameForString:[NSString stringWithFormat:@"%@-reply-%@", NSStringFromSelector(selector), uuid]];
-}
-
--(IOSurfaceRef)_createSurfaceForDictionary:(NSDictionary*)dict
-{
-	NSError* err = nil;
-	NSData* dictData = [NSPropertyListSerialization dataWithPropertyList:dict format:NSPropertyListXMLFormat_v1_0 options:kNilOptions error:&err];
-	size_t dictSize = dictData.length;
-	const void* dictBytes = dictData.bytes;
-	if (err || !dictBytes)
-		THROW(@"Failed to serialize dictionary with error: %@", err);
-	NSDictionary* properties = @{
-		(__bridge NSString*)kIOSurfaceAllocSize : @(dictSize)
+	void (^fillOOLDescriptor)(mach_msg_ool_descriptor_t*, const void*, size_t, bool) = ^(mach_msg_ool_descriptor_t* desc, const void* buffer, size_t size, bool deallocate){
+		desc->address = (void*)buffer;
+		desc->size = size;
+		desc->deallocate = deallocate;
+		desc->copy = MACH_MSG_VIRTUAL_COPY;
+		desc->type = MACH_MSG_OOL_DESCRIPTOR;
 	};
-	IOSurfaceRef surface = IOSurfaceCreate((__bridge CFDictionaryRef)properties);
-	
-	if (!surface)
-		THROW(@"Failed to create surface for dictionary");
-	if (IOSurfaceGetAllocSize(surface) < dictSize)
-		THROW(@"Surface too small for dictionary");
-	memcpy(IOSurfaceGetBaseAddress(surface), dictBytes, dictSize);
-	return surface;
-}
 
--(uint64_t)_stateForSurface:(IOSurfaceRef)surface
-{
-	return ((uint64_t)getpid() << 32) | (uint64_t)IOSurfaceCreateMachPort(surface);
-}
-
--(void)_sendNotificationWithName:(NSString*)name state:(uint64_t)state
-{
-	const char* cName = name.UTF8String;
-	int token;
-	notify_register_check(cName, &token);
-	notify_set_state(token, state);
-	notify_post(cName);
-	notify_cancel(token);
-}
-
--(void)_addObserverForName:(NSString*)name selector:(SEL)sel
-{
-	const char* cName = name.UTF8String;
-	int notifyToken;
-	__weak __typeof(self) weakSelf = self;
-	notify_register_dispatch(cName, &notifyToken, dispatch_get_main_queue(), ^(int token){
-		NSMethodSignature* signature = [weakSelf methodSignatureForSelector:sel];
-		NSInvocation* invocation = [NSInvocation invocationWithMethodSignature:signature];
-		invocation.target = weakSelf;
-		invocation.selector = sel;
-		id nameObject = name;
-		if (signature.numberOfArguments > 2)
-			[invocation setArgument:&nameObject atIndex:2];
-		if (signature.numberOfArguments > 3)
-		{
-			uint64_t state;
-			notify_get_state(token, &state);
-			[invocation setArgument:&state atIndex:3];
-		}
-		[invocation invoke];
-	});
-	[_observerTokens addObject:@(notifyToken)];
-}
-
--(NSDictionary*)_dictionaryForSurface:(IOSurfaceRef)surface
-{
-	NSDictionary* dict = nil;
-	if (surface)
+	memset(msg, 0, sizeof(MRYIPCMessage_t));
+	msg->base.header.msgh_bits = MACH_MSGH_BITS_COMPLEX | MACH_MSGH_BITS(MACH_MSG_TYPE_COPY_SEND, MACH_MSG_TYPE_MAKE_SEND_ONCE);
+	msg->base.header.msgh_size = sizeof(MRYIPCMessage_t);
+	msg->base.header.msgh_remote_port = remotePort;
+	msg->base.header.msgh_id = kMRYIPCCallMethodID;
+	msg->base.body.msgh_descriptor_count = 2;
+	fillOOLDescriptor(&msg->messageName, name, strlen(name) + 1, false);
+	if (userInfo)
 	{
-		void* addr = IOSurfaceGetBaseAddress(surface);
-		size_t size = IOSurfaceGetAllocSize(surface);
-		NSData* surfaceData = [NSData dataWithBytesNoCopy:addr length:size freeWhenDone:NO];
 		NSError* err;
-		NSPropertyListFormat format = NSPropertyListXMLFormat_v1_0;
-		dict = [NSPropertyListSerialization propertyListWithData:surfaceData options:NSPropertyListImmutable format:&format error:&err];
+		NSData* data = [NSPropertyListSerialization dataWithPropertyList:userInfo format:NSPropertyListBinaryFormat_v1_0 options:0 error:&err];
+		if (!data)
+			THROW(@"Failed to serialize arguments: %@", err);
+		//stash userInfoData in out pointer to stop it being deallocated before message is sent
+		*userInfoData = data;
+		fillOOLDescriptor(&msg->userInfo, data.bytes, data.length, false);
 	}
-	return dict;
+	else
+		fillOOLDescriptor(&msg->userInfo, NULL, 0, false);
 }
 
--(void)_messageReceived:(NSString*)name withState:(uint64_t)state
+-(BOOL)_validateMessage:(MRYIPCMessage_t*)msg forID:(uint32_t)msgID
 {
-	mach_port_t surfacePort = (mach_port_t)state;
-	IOSurfaceRef userInfoSurface = IOSurfaceLookupFromMachPort(surfacePort);
-	if (userInfoSurface)
+	if (msg->base.header.msgh_size < sizeof(*msg))
+		return NO;
+	if (msg->base.header.msgh_id != msgID)
+		return NO;
+	if (!msg->messageName.address || msg->messageName.size < 2)
+		return NO;
+	return YES;
+}
+
+-(NSDictionary*)_userInfoForMessage:(MRYIPCMessage_t*)msg
+{
+	NSDictionary* userInfo = nil;
+	if (msg->userInfo.address && msg->userInfo.size)
 	{
-		NSDictionary* userInfo = [self _dictionaryForSurface:userInfoSurface];
-		CFRelease(userInfoSurface);
-		mach_port_deallocate(mach_task_self(), surfacePort);
-
-		NSString* messageName = userInfo[@"name"];
-		_MRYIPCMethod* method = _methods[messageName];
-		if (!method)
-			THROW(@"unrecognised message: %@", messageName);
-		
-		//call method:
-		NSMethodSignature* signature = [method.target methodSignatureForSelector:method.selector];
-		NSInvocation* invocation = [NSInvocation invocationWithMethodSignature:signature];
-		invocation.target = method.target;
-		invocation.selector = method.selector;
-		NSDictionary* args = userInfo[@"args"];
-		NSString* replyUUID = userInfo[@"replyUUID"];
-		if (signature.numberOfArguments > 2)
-			[invocation setArgument:&args atIndex:2];
-		[invocation invoke];
-
-		//send reply:
-		if (replyUUID.length)
-		{
-			__unsafe_unretained id weakReturnValue = nil;
-			if (strcmp(signature.methodReturnType, "v") != 0)
-				[invocation getReturnValue:&weakReturnValue];
-			id returnValue = weakReturnValue;
-			NSDictionary* replyDict = returnValue ? @{@"returnValue" : returnValue} : @{};
-			IOSurfaceRef replySurface = [self _createSurfaceForDictionary:replyDict];
-			NSString* replyMessageName = [self _messageReplyNameForSelector:method.selector uuid:replyUUID];
-			[self _sendNotificationWithName:replyMessageName state:[self _stateForSurface:replySurface]];
-			
-			float timeout = 2.0;
-			dispatch_after(dispatch_time(DISPATCH_TIME_NOW, timeout * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-				CFRelease(replySurface);
-			});
-		}
+		NSData* userInfoData = [NSData dataWithBytesNoCopy:msg->userInfo.address length:msg->userInfo.size freeWhenDone:NO];
+		NSError* err;
+		userInfo = [NSPropertyListSerialization propertyListWithData:userInfoData options:NSPropertyListImmutable format:NULL error:&err];
+		if (userInfo && ![userInfo isKindOfClass:[NSDictionary class]])
+			userInfo = nil;
 	}
+	return userInfo;
 }
 
--(void)_throwException:(NSString*)msg fromMethod:(SEL)method
+-(void)_freeOOLDataInMessage:(MRYIPCMessage_t*)msg
 {
-	NSString* reason = [NSString stringWithFormat:@"-[%@ %@] - %@", [self class], NSStringFromSelector(method), msg];
-	NSException* myException = [NSException exceptionWithName:@"MRYIPCException" reason:reason userInfo:nil];
-	@throw myException;
+	if (msg->messageName.address && msg->messageName.size)
+		vm_deallocate(mach_task_self(), (vm_address_t)msg->messageName.address, msg->messageName.size);
+	if (msg->messageName.address && msg->messageName.size)
+		vm_deallocate(mach_task_self(), (vm_address_t)msg->userInfo.address, msg->userInfo.size);
+}
+
+-(BOOL)_messageReceived:(MRYIPCMessage_t*)msg
+{
+	BOOL valid = [self _validateMessage:msg forID:kMRYIPCCallMethodID];
+	if (!valid)
+		return NO;
+	char* messageName = msg->messageName.address;
+	messageName[msg->messageName.size - 1] = '\0';
+	messageName = strdup(messageName);
+
+	NSDictionary* args = [self _userInfoForMessage:msg];
+	_MRYIPCMethod* method = _methods[[NSString stringWithUTF8String:messageName]];
+	if (!method)
+		return NO;
+	
+	//call method:
+	NSMethodSignature* signature = [method.target methodSignatureForSelector:method.selector];
+	NSInvocation* invocation = [NSInvocation invocationWithMethodSignature:signature];
+	invocation.target = method.target;
+	invocation.selector = method.selector;
+	if (signature.numberOfArguments > 2)
+		[invocation setArgument:&args atIndex:2];
+	[invocation invoke];
+
+	__unsafe_unretained id weakReturnValue = nil;
+	if (strcmp(signature.methodReturnType, "v") != 0)
+		[invocation getReturnValue:&weakReturnValue];
+	id returnValue = weakReturnValue;
+	NSDictionary* userInfo = returnValue ? @{@"returnValue" : returnValue} : nil;
+
+	[self _freeOOLDataInMessage:msg];
+
+	NSData* userInfoData;
+	[self _createMessage:msg withName:messageName userInfo:userInfo remotePort:msg->base.header.msgh_remote_port userInfoData:&userInfoData];
+	msg->base.header.msgh_bits = MACH_MSGH_BITS_COMPLEX | MACH_MSGH_BITS(MACH_MSG_TYPE_MOVE_SEND_ONCE, 0);
+	msg->base.header.msgh_id = kMRYIPCMethodReplyID;
+
+	free(messageName);
+	return YES;
 }
 
 -(void)dealloc
 {
-	for (id token in _observerTokens)
-		notify_cancel([token intValue]);
-	[self _sendNotificationWithName:@"com.muirey03.libmryipc-removeObserver" state:(uint64_t)getpid()];
+	mach_port_deallocate(mach_task_self(), _serverPort);
 }
 @end
