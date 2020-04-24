@@ -2,6 +2,7 @@
 @property (nonatomic, readonly) NSString* centerName;
 +(instancetype)centerNamed:(NSString*)name;
 -(void)addTarget:(id)target action:(SEL)action;
+-(void)addTarget:(id(^)(NSDictionary*))target forSelector:(SEL)selector;
 //asynchronously call a void method
 -(void)callExternalVoidMethod:(SEL)method withArguments:(NSDictionary*)args;
 //synchronously call a method and recieve the return value

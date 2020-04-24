@@ -18,6 +18,7 @@ static void _throwException(NSString* msg, SEL method)
 @property (nonatomic, readonly) id target;
 @property (nonatomic, readonly) SEL selector;
 -(instancetype)initWithTarget:(id)target selector:(SEL)selector;
+-(id)invokeWithArguments:(NSDictionary*)args;
 @end
 
 @implementation _MRYIPCMethod
@@ -30,6 +31,44 @@ static void _throwException(NSString* msg, SEL method)
 	}
 	return self;
 }
+
+-(id)invokeWithArguments:(NSDictionary*)args
+{
+	//call method:
+	NSMethodSignature* signature = [_target methodSignatureForSelector:_selector];
+	NSInvocation* invocation = [NSInvocation invocationWithMethodSignature:signature];
+	invocation.target = _target;
+	invocation.selector = _selector;
+	if (signature.numberOfArguments > 2)
+		[invocation setArgument:&args atIndex:2];
+	[invocation invoke];
+
+	__unsafe_unretained id weakReturnValue = nil;
+	if (strcmp(signature.methodReturnType, "v") != 0)
+		[invocation getReturnValue:&weakReturnValue];
+	id returnValue = weakReturnValue;
+	return returnValue;
+}
+@end
+
+@interface _MRYIPCBlockMethod : _MRYIPCMethod
+@property (nonatomic, readonly) id(^block)(NSDictionary*);
+@end
+
+@implementation _MRYIPCBlockMethod
+-(instancetype)initWithBlock:(id(^)(NSDictionary*))block
+{
+	if ((self = [super init]))
+	{
+		_block = block;
+	}
+	return self;
+}
+
+-(id)invokeWithArguments:(NSDictionary*)args
+{
+	return _block(args);
+}
 @end
 
 typedef struct MRYIPCMessage
@@ -41,6 +80,7 @@ typedef struct MRYIPCMessage
 
 @interface MRYIPCCenter ()
 -(instancetype)initWithName:(NSString*)name;
+-(void)_addTargetMethod:(_MRYIPCMethod*)method forSelector:(SEL)selector;
 -(NSString*)_messageNameForSelector:(SEL)selector;
 -(void)_createMessage:(MRYIPCMessage_t*)msg withName:(const char*)name userInfo:(NSDictionary*)userInfo remotePort:(mach_port_t)remotePort userInfoData:(__strong NSData**)userInfoData;
 -(BOOL)_validateMessage:(MRYIPCMessage_t*)msg forID:(uint32_t)msgID;
@@ -76,16 +116,11 @@ typedef struct MRYIPCMessage
 	return self;
 }
 
--(void)addTarget:(id)target action:(SEL)action
+-(void)_addTargetMethod:(_MRYIPCMethod*)method forSelector:(SEL)selector
 {
-	if (!action || !strlen(sel_getName(action)))
-		THROW(@"method cannot be null");
-	if (!target)
-		THROW(@"target cannot be null");
-	
-	NSString* messageName = [self _messageNameForSelector:action];
+	NSString* messageName = [self _messageNameForSelector:selector];
 	if (_methods[messageName])
-		THROW(@"method already registered: %@", NSStringFromSelector(action));
+		THROW(@"method already registered: %@", NSStringFromSelector(selector));
 	
 	if (_serverPort == MACH_PORT_NULL)
 	{
@@ -117,8 +152,27 @@ typedef struct MRYIPCMessage
 		});
 	}
 
-	_MRYIPCMethod* method = [[_MRYIPCMethod alloc] initWithTarget:target selector:action];
 	_methods[messageName] = method;
+}
+
+-(void)addTarget:(id)target action:(SEL)action
+{
+	if (!action || !strlen(sel_getName(action)))
+		THROW(@"method cannot be null");
+	if (!target)
+		THROW(@"target cannot be null");
+	_MRYIPCMethod* method = [[_MRYIPCMethod alloc] initWithTarget:target selector:action];
+	[self _addTargetMethod:method forSelector:action];
+}
+
+-(void)addTarget:(id(^)(NSDictionary*))target forSelector:(SEL)selector
+{
+	if (!selector || !strlen(sel_getName(selector)))
+		THROW(@"selector cannot be null");
+	if (!target)
+		THROW(@"target cannot be null");
+	_MRYIPCBlockMethod* method = [[_MRYIPCBlockMethod alloc] initWithBlock:target];
+	[self _addTargetMethod:method forSelector:selector];
 }
 
 //deprecated
@@ -280,19 +334,7 @@ typedef struct MRYIPCMessage
 	if (!method)
 		return NO;
 	
-	//call method:
-	NSMethodSignature* signature = [method.target methodSignatureForSelector:method.selector];
-	NSInvocation* invocation = [NSInvocation invocationWithMethodSignature:signature];
-	invocation.target = method.target;
-	invocation.selector = method.selector;
-	if (signature.numberOfArguments > 2)
-		[invocation setArgument:&args atIndex:2];
-	[invocation invoke];
-
-	__unsafe_unretained id weakReturnValue = nil;
-	if (strcmp(signature.methodReturnType, "v") != 0)
-		[invocation getReturnValue:&weakReturnValue];
-	id returnValue = weakReturnValue;
+	id returnValue = [method invokeWithArguments:args];
 	NSDictionary* userInfo = returnValue ? @{@"returnValue" : returnValue} : nil;
 
 	[self _freeOOLDataInMessage:msg];
