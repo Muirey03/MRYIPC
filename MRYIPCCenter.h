@@ -2,13 +2,13 @@
 @property (nonatomic, readonly) NSString* centerName;
 +(instancetype)centerNamed:(NSString*)name;
 -(void)addTarget:(id)target action:(SEL)action;
--(void)addTarget:(id(^)(NSDictionary*))target forSelector:(SEL)selector;
+-(void)addTarget:(id(^)(id))target forSelector:(SEL)selector;
 //asynchronously call a void method
--(void)callExternalVoidMethod:(SEL)method withArguments:(NSDictionary*)args;
+-(void)callExternalVoidMethod:(SEL)method withArguments:(id)args;
 //synchronously call a method and recieve the return value
--(id)callExternalMethod:(SEL)method withArguments:(NSDictionary*)args;
+-(id)callExternalMethod:(SEL)method withArguments:(id)args;
 //asynchronously call a method and receive the return value in the completion handler
--(void)callExternalMethod:(SEL)method withArguments:(NSDictionary*)args completion:(void(^)(id))completionHandler;
+-(void)callExternalMethod:(SEL)method withArguments:(id)args completion:(void(^)(id))completionHandler;
 
 //deprecated
 -(void)registerMethod:(SEL)selector withTarget:(id)target;

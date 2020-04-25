@@ -18,7 +18,7 @@ static void _throwException(NSString* msg, SEL method)
 @property (nonatomic, readonly) id target;
 @property (nonatomic, readonly) SEL selector;
 -(instancetype)initWithTarget:(id)target selector:(SEL)selector;
--(id)invokeWithArguments:(NSDictionary*)args;
+-(id)invokeWithArguments:(id)args;
 @end
 
 @implementation _MRYIPCMethod
@@ -32,7 +32,7 @@ static void _throwException(NSString* msg, SEL method)
 	return self;
 }
 
--(id)invokeWithArguments:(NSDictionary*)args
+-(id)invokeWithArguments:(id)args
 {
 	//call method:
 	NSMethodSignature* signature = [_target methodSignatureForSelector:_selector];
@@ -52,11 +52,11 @@ static void _throwException(NSString* msg, SEL method)
 @end
 
 @interface _MRYIPCBlockMethod : _MRYIPCMethod
-@property (nonatomic, readonly) id(^block)(NSDictionary*);
+@property (nonatomic, readonly) id(^block)(id);
 @end
 
 @implementation _MRYIPCBlockMethod
--(instancetype)initWithBlock:(id(^)(NSDictionary*))block
+-(instancetype)initWithBlock:(id(^)(id))block
 {
 	if ((self = [super init]))
 	{
@@ -65,7 +65,7 @@ static void _throwException(NSString* msg, SEL method)
 	return self;
 }
 
--(id)invokeWithArguments:(NSDictionary*)args
+-(id)invokeWithArguments:(id)args
 {
 	return _block(args);
 }
@@ -165,7 +165,7 @@ typedef struct MRYIPCMessage
 	[self _addTargetMethod:method forSelector:action];
 }
 
--(void)addTarget:(id(^)(NSDictionary*))target forSelector:(SEL)selector
+-(void)addTarget:(id(^)(id))target forSelector:(SEL)selector
 {
 	if (!selector || !strlen(sel_getName(selector)))
 		THROW(@"selector cannot be null");
@@ -181,12 +181,12 @@ typedef struct MRYIPCMessage
 	[self addTarget:target action:selector];
 }
 
--(void)callExternalVoidMethod:(SEL)method withArguments:(NSDictionary*)args
+-(void)callExternalVoidMethod:(SEL)method withArguments:(id)args
 {
 	[self callExternalMethod:method withArguments:args completion:nil];
 }
 
--(id)callExternalMethod:(SEL)method withArguments:(NSDictionary*)args
+-(id)callExternalMethod:(SEL)method withArguments:(id)args
 {
 	__block id returnValue = nil;
 	dispatch_semaphore_t sema = dispatch_semaphore_create(0);
@@ -198,7 +198,7 @@ typedef struct MRYIPCMessage
 	return returnValue;
 }
 
--(void)callExternalMethod:(SEL)method withArguments:(NSDictionary*)args completion:(void(^)(id))completionHandler
+-(void)callExternalMethod:(SEL)method withArguments:(id)args completion:(void(^)(id))completionHandler
 {
 	dispatch_async(_queue, ^{
 		kern_return_t kr;
@@ -230,7 +230,8 @@ typedef struct MRYIPCMessage
 		MRYIPCMessage_t* msg = &buffer.msg;
 
 		NSData* userInfoData;
-		[self _createMessage:msg withName:messageName.UTF8String userInfo:args remotePort:_serverPort userInfoData:&userInfoData];
+		NSDictionary* userInfo = args ? @{@"args" : args} : nil;
+		[self _createMessage:msg withName:messageName.UTF8String userInfo:userInfo remotePort:_serverPort userInfoData:&userInfoData];
 		mach_port_t replyPort = createReplyPort();
 		msg->base.header.msgh_local_port = replyPort;
 		mach_msg_return_t ret = KERN_SUCCESS;
@@ -241,7 +242,7 @@ typedef struct MRYIPCMessage
 		if (!valid)
 			THROW(@"Invalid reply message");
 
-		NSDictionary* userInfo = [self _userInfoForMessage:msg];
+		userInfo = [self _userInfoForMessage:msg];
 		id returnValue = userInfo ? userInfo[@"returnValue"] : nil;
 		if (completionHandler)
 			completionHandler(returnValue);
@@ -329,13 +330,14 @@ typedef struct MRYIPCMessage
 	messageName[msg->messageName.size - 1] = '\0';
 	messageName = strdup(messageName);
 
-	NSDictionary* args = [self _userInfoForMessage:msg];
+	NSDictionary* userInfo = [self _userInfoForMessage:msg];
+	id args = userInfo[@"args"];
 	_MRYIPCMethod* method = _methods[[NSString stringWithUTF8String:messageName]];
 	if (!method)
 		return NO;
 	
 	id returnValue = [method invokeWithArguments:args];
-	NSDictionary* userInfo = returnValue ? @{@"returnValue" : returnValue} : nil;
+	userInfo = returnValue ? @{@"returnValue" : returnValue} : nil;
 
 	[self _freeOOLDataInMessage:msg];
 

@@ -14,6 +14,7 @@ An example usage can be seen in ExampleClient and ExampleServer in this reposito
 First, create the client center:
 
 	MRYIPCCenter* center = [MRYIPCCenter centerNamed:@"com.muirey03.MRYExampleServer"];
+
 Then, go ahead and call any method you like:
 
 	NSNumber* result = [center callExternalMethod:@selector(addNumbers:) withArguments:@{@"value1" : @5, @"value2" : @7}];
@@ -21,11 +22,13 @@ Then, go ahead and call any method you like:
 `MRYIPCCenter` provides 3 ways to call methods on the center:
 
 	//asynchronously call a void method
-	-(void)callExternalVoidMethod:(SEL)method withArguments:(NSDictionary*)args;
+	-(void)callExternalVoidMethod:(SEL)method withArguments:(id)args;
 	//synchronously call a method and recieve the return value
-	-(id)callExternalMethod:(SEL)method withArguments:(NSDictionary*)args;
+	-(id)callExternalMethod:(SEL)method withArguments:(id)args;
 	//asynchronously call a method and receive the return value in the completion handler
-	-(void)callExternalMethod:(SEL)method withArguments:(NSDictionary*)args completion:(void(^)(id))completionHandler;
+	-(void)callExternalMethod:(SEL)method withArguments:(id)args completion:(void(^)(id))completionHandler;
+
+Please note that the arguments and return value type must be one that can be stored in a plist (`NSString*`, `NSNumber*`, `NSData*`, `NSArray*` or `NSDictionary*`).
 
 ### The server
 Again, start by creating a sever center with the same name as the client (you'll need to store a reference somewhere to stop it being deallocated):
@@ -43,6 +46,20 @@ Then just implement the methods and let MRYIPC handle the rest:
 		NSInteger value1 = [args[@"value1"] integerValue];
 		NSInteger value2 = [args[@"value2"] integerValue];
 		return @(value1 + value2);
+	}
+
+MRYIPC also allows for block-based servers for more simple callbacks where you don't necessarily need an object to act as the server:
+
+	static MRYIPCCenter* center;
+
+	%ctor
+	{
+		center = [MRYIPCCenter centerNamed:@"com.muirey03.MRYExampleServer"];
+		[center addTarget:^NSNumber*(NSDictionary* args){
+			NSInteger value1 = [args[@"value1"] integerValue];
+			NSInteger value2 = [args[@"value2"] integerValue];
+			return @(value1 + value2);
+		} forSelector:@selector(addNumbers:)];
 	}
 
 ## Credits
