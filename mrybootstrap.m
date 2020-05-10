@@ -2,11 +2,6 @@
 #import <xpc/xpc.h>
 #import <sandbox.h>
 
-#define HELPER_SERVICE "com.apple.mobilegestalt.xpc"
-#define kMRYBootstrapMessageIDKey "MRYBootstrapMessageID"
-#define kMRYBootstrapLookupServiceID 'LKUP'
-#define kMRYBootstrapCheckinServiceID 'CKIN'
-
 mach_port_t xpc_dictionary_copy_mach_send(xpc_object_t dictionary, const char* name);
 mach_port_t xpc_dictionary_extract_mach_recv(xpc_object_t dictionary, const char* name);
 

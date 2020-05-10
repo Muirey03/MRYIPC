@@ -4,6 +4,11 @@
 #include <mach/mach.h>
 #include <bootstrap.h>
 
+#define HELPER_SERVICE "com.apple.mobilegestalt.xpc"
+#define kMRYBootstrapMessageIDKey "MRYBootstrapMessageID"
+#define kMRYBootstrapLookupServiceID 'LKUP'
+#define kMRYBootstrapCheckinServiceID 'CKIN'
+
 #ifdef __cplusplus
 extern "C" {
 #endif

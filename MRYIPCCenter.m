@@ -53,12 +53,13 @@ static void _throwException(NSString* msg, SEL method)
 
 @interface _MRYIPCBlockMethod : _MRYIPCMethod
 @property (nonatomic, readonly) id(^block)(id);
+-(instancetype)initWithBlock:(id(^)(id))block selector:(SEL)selector;
 @end
 
 @implementation _MRYIPCBlockMethod
--(instancetype)initWithBlock:(id(^)(id))block
+-(instancetype)initWithBlock:(id(^)(id))block selector:(SEL)selector
 {
-	if ((self = [super init]))
+	if ((self = [super initWithTarget:nil selector:selector]))
 	{
 		_block = block;
 	}
@@ -116,6 +117,14 @@ typedef struct MRYIPCMessage
 	return self;
 }
 
+-(NSArray<NSString*>*)selectors
+{
+	NSMutableArray<NSString*>* selectors = [[NSMutableArray alloc] initWithCapacity:_methods.count];
+	for (NSString* messageName in _methods)
+		[selectors addObject:@(sel_getName(_methods[messageName].selector))];
+	return selectors;
+}
+
 -(void)_addTargetMethod:(_MRYIPCMethod*)method forSelector:(SEL)selector
 {
 	NSString* messageName = [self _messageNameForSelector:selector];
@@ -171,8 +180,14 @@ typedef struct MRYIPCMessage
 		THROW(@"selector cannot be null");
 	if (!target)
 		THROW(@"target cannot be null");
-	_MRYIPCBlockMethod* method = [[_MRYIPCBlockMethod alloc] initWithBlock:target];
+	_MRYIPCBlockMethod* method = [[_MRYIPCBlockMethod alloc] initWithBlock:target selector:selector];
 	[self _addTargetMethod:method forSelector:selector];
+}
+
+-(void)removeMethodForSelector:(SEL)selector
+{
+	NSString* messageName = [self _messageNameForSelector:selector];
+	[_methods removeObjectForKey:messageName];
 }
 
 //deprecated

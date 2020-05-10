@@ -1,5 +1,0 @@
-#!/bin/sh
-echo "Restarting MobileGestaltHelper..."
-killall -9 MobileGestaltHelper 2> /dev/null
-echo "Done!"
-exit 0
