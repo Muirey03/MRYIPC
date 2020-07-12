@@ -13,10 +13,5 @@ internal-stage::
 	mkdir -p usr/lib
 	cp $(THEOS_STAGING_DIR)/usr/lib/libmryipc.dylib usr/lib/libmryipc.dylib
 
-before-package::
-	chmod 4775 $(THEOS_STAGING_DIR)/usr/bin/mryldrestart
-
 SUBPROJECTS += mrybootstrap
-SUBPROJECTS += mryipcsb
-SUBPROJECTS += mryldrestart
 include $(THEOS_MAKE_PATH)/aggregate.mk

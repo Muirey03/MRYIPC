@@ -1,7 +1,0 @@
-#!/bin/sh
-echo "" > /tmp/mryipcneedsrestart
-chown mobile:mobile /tmp/mryipcneedsrestart
-chown root:wheel /usr/bin/mryldrestart
-chmod 4775 /usr/bin/mryldrestart
-echo "Warning, the next respring will take longer than normal, please be patient."
-exit 0
