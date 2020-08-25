@@ -31,6 +31,8 @@ Then, go ahead and call any method you like:
 Please note that the arguments and return value type must be one that can be stored in a plist (`NSString*`, `NSNumber*`, `NSData*`, `NSArray*` or `NSDictionary*`).
 
 ### The server
+**IMPORTANT NOTE:** Only one server is allowed for any given name. You cannot create 2 servers in 2 different processes with the same name, that is illegal, and will cause the second process to crash. 
+
 Again, start by creating a sever center with the same name as the client (you'll need to store a reference somewhere to stop it being deallocated):
 
 	MRYIPCCenter* center = [MRYIPCCenter centerNamed:@"com.muirey03.MRYExampleServer"];
