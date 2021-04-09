@@ -2,7 +2,7 @@ Package: com.muirey03.libmryipc
 Name: libMRYIPC
 Depends: mobilesubstrate
 Conflicts: ws.hbang.stopcrashingpls (=1.0)
-Version: 2.0
+Version: 2.0.1
 Architecture: iphoneos-arm
 Description: Easy-to-use, RocketBootstrap-less iOS IPC
 Maintainer: Muirey03
