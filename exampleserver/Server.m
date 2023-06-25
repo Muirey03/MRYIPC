@@ -1,7 +1,5 @@
+#import "Server.h"
 #import <MRYIPCCenter.h>
-
-@interface MRYExampleServer : NSObject
-@end
 
 @implementation MRYExampleServer
 {
