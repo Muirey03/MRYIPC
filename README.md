@@ -6,14 +6,14 @@ MRYIPC is an easy-to-use IPC (inter-process communication) mechanism for jailbro
 `MRYIPCCenter` is similar in API to `CPDistributedMessagingCenter`, so it shouldn't be too challenging to replace current `CPDistributedMessagingCenter` implementations with `MRYIPCCenter`.
 
 ## How to use
-To use MRYIPC, copy `MRYIPCCenter.h` to `$THEOS/include` and `usr/lib/libmryipc.dylib` to `$THEOS/lib`. Then you can add `XXX_LIBRARIES = mryipc` to your Makefile and `#import <MRYIPCCenter.h>` into any source files you want to use it in. Then add `Depends: com.muirey03.libmryipc` to your control file.
+To use MRYIPC, copy `MRYIPCCenter.h` to `$THEOS/include` and `usr/lib/libmryipc.dylib` to `$THEOS/lib/` and/or `var/jb/usr/lib/libmryipc.dylib` to `$THEOS/lib/iphone/rootless/`. Then you can add `XXX_LIBRARIES = mryipc` to your Makefile and `#import <MRYIPCCenter.h>` into any source files you want to use it in. Then add `Depends: com.muirey03.libmryipc` to your control file.
 
 An example usage can be seen in ExampleClient and ExampleServer in this repository.
 
 ### The client
 First, create the client center:
 
-	MRYIPCCenter* center = [MRYIPCCenter centerNamed:@"com.muirey03.MRYExampleServer"];
+	MRYIPCCenter* center = [%c(MRYIPCCenter) centerNamed:@"com.muirey03.MRYExampleServer"];
 
 Then, go ahead and call any method you like:
 
@@ -31,11 +31,11 @@ Then, go ahead and call any method you like:
 Please note that the arguments and return value type must be one that can be stored in a plist (`NSString*`, `NSNumber*`, `NSData*`, `NSArray*` or `NSDictionary*`).
 
 ### The server
-**IMPORTANT NOTE:** Only one server is allowed for any given name. You cannot create 2 servers in 2 different processes with the same name, that is illegal, and will cause the second process to crash. 
+**IMPORTANT NOTE:** Only one server is allowed for any given name. You cannot create 2 servers in 2 different processes with the same name, that is illegal, and will cause the second process to crash.
 
 Again, start by creating a sever center with the same name as the client (you'll need to store a reference somewhere to stop it being deallocated):
 
-	MRYIPCCenter* center = [MRYIPCCenter centerNamed:@"com.muirey03.MRYExampleServer"];
+	MRYIPCCenter* center = [%c(MRYIPCCenter) centerNamed:@"com.muirey03.MRYExampleServer"];
 
 Then register any methods you want to make external:
 
